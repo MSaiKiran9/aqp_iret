@@ -1,0 +1,65 @@
+from src.data.dataset import demo_dataset
+from src.retrieval.bm25 import BM25Retriever
+from src.evidence.state import EvidenceState
+from src.query_generation.generator import generate_candidates, get_missing_information
+from src.planner.adaptive_planner import AdaptiveQueryPlanner, PlannerConfig, jaccard
+from src.stopping.stopping import StoppingConfig, can_afford_iteration, should_stop
+from src.pipeline import run_adaptive
+from src.evaluation.metrics import evidence_metrics
+from baselines.one_shot_rag import run_one_shot
+from baselines.react import run_react_style
+
+
+class FakeProvider:
+    def complete_json(self, prompt):
+        if "Analyze" in prompt:
+            return {"known_facts": [], "missing_information": "country relation", "target_terms": ["ISRO", "country"], "coverage": 0.2}
+        return {"queries": ["ISRO country", "Indian Space Research Organisation country", "ISRO national agency"]}
+
+
+def components():
+    docs, examples = demo_dataset()
+    retriever = BM25Retriever(docs)
+    stop = StoppingConfig(max_iterations=3, retrieval_budget=24, min_iterations=2, min_new_documents=1, min_missing_coverage=.75, no_gain_limit=1)
+    planner = AdaptiveQueryPlanner(retriever, PlannerConfig())
+    return examples[0], retriever, stop, planner
+
+
+def test_generation_bm25_and_normalized_planner_scores():
+    example, retriever, _, planner = components()
+    state = EvidenceState(example.question)
+    need = get_missing_information(example.question, state, FakeProvider())
+    candidates = generate_candidates(example.question, state, need, 3, FakeProvider())
+    selected, scores = planner.select(candidates, state, 2)
+    assert len(candidates) == 3 and selected["query"] in candidates
+    assert all(0 <= row[key] <= 1 for row in scores for key in ("relevance", "missing", "redundancy", "cost"))
+    assert retriever.search("Chandrayaan-3", 2)[0][0].id == "d3" or retriever.search("Chandrayaan-3", 2)[0][0].id == "d1"
+
+
+def test_state_redundancy_and_budget_accounting():
+    example, retriever, stop, _ = components()
+    state = EvidenceState(example.question)
+    results = retriever.search(example.question, 2)
+    state.add_retrieval(example.question, results, [], evaluation_cost=6)
+    assert state.iteration == 1 and state.retrieval_cost == 8 and state.evidence_ids
+    assert jaccard({"a"}, {"a"}) == 1.0 and jaccard({"a"}, {"b"}) == 0.0
+    assert not can_afford_iteration(state, 3, 2, StoppingConfig(retrieval_budget=13))
+
+
+def test_stopping_enforces_inference_only_conditions():
+    example, retriever, stop, _ = components()
+    state = EvidenceState(example.question)
+    state.missing_information = {"coverage": 1.0}
+    state.add_retrieval(example.question, retriever.search(example.question, 2), [], 0)
+    assert should_stop(state, stop) == (False, "continue")
+
+
+def test_baselines_metrics_and_adaptive_end_to_end():
+    example, retriever, stop, planner = components()
+    one = run_one_shot(example, retriever, 2)
+    react = run_react_style(example, retriever, 2, 3, stop)
+    adaptive = run_adaptive(example, retriever, planner, stop, 2, 3)
+    assert one["steps"] == 1 and react["steps"] >= 1
+    assert adaptive["steps"] >= 2 and adaptive["retrieval_cost"] <= stop.retrieval_budget
+    assert adaptive["candidate_evaluation_cost"] > 0 and adaptive["state"]["history"]
+    assert evidence_metrics([{"retrieved_ids": ["d1"]}], ["d1"], ["d1", "d2"], 1)["first_step_recall_at_k"] == .5

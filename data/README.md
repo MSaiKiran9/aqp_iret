@@ -1,0 +1,1 @@
+Store only small, shareable sample data here. Do not commit full downloaded datasets or model caches. Use the HotpotQA adapter in `src/data/dataset.py` or pass a JSON dataset to the experiment runner.

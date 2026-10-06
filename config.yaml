@@ -1,0 +1,33 @@
+seed: 42
+dataset:
+  name: demo # demo or hotpotqa
+  split: validation
+  sample_size: 2
+retrieval:
+  top_k: 2
+  max_iterations: 3
+  budget: 24 # document retrieval units: previews plus selected retrievals
+  positive_scores_only: true
+query_generation:
+  candidate_count: 3
+llm:
+  enabled: false
+  provider: openai_compatible
+  model: gpt-4o-mini
+  api_key_env: OPENAI_API_KEY
+  base_url: https://api.openai.com/v1/chat/completions
+  timeout_seconds: 30
+planner:
+  relevance_weight: 0.45
+  missing_information_weight: 0.35
+  redundancy_weight: 0.15
+  cost_weight: 0.05
+  enabled: [relevance, missing, redundancy, cost]
+stopping:
+  min_iterations: 2
+  min_new_documents: 1
+  min_missing_coverage: 0.75
+  no_gain_limit: 1
+output:
+  directory: results
+verbose: true

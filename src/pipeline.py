@@ -1,0 +1,28 @@
+"""Proposed adaptive query-planning retrieval loop."""
+from src.evidence.state import EvidenceState
+from src.query_generation.generator import generate_candidates, get_missing_information
+from src.stopping.stopping import can_afford_iteration, should_stop
+from src.evaluation.metrics import evidence_metrics
+
+
+def run_adaptive(example, retriever, planner, stopping_config, top_k: int, candidate_count: int, provider=None, verbose: bool = False) -> dict:
+    state = EvidenceState(example.question)
+    reason = "continue"
+    while True:
+        state.missing_information = get_missing_information(example.question, state, provider)
+        state.candidate_queries = generate_candidates(example.question, state, state.missing_information, candidate_count, provider)
+        if not state.candidate_queries:
+            reason = "no_candidates"; break
+        if not can_afford_iteration(state, len(state.candidate_queries), top_k, stopping_config):
+            reason = "budget_exhausted"; break
+        selected, scores = planner.select(state.candidate_queries, state, top_k)
+        evaluation_cost = sum(row["preview_cost"] for row in scores)
+        results = retriever.search(selected["query"], top_k, planner.positive_scores_only)
+        state.add_retrieval(selected["query"], results, scores, evaluation_cost)
+        if verbose:
+            print(f"Iteration {state.iteration}: selected={selected['query']} retrieved={[d.id for d, _ in results]} cost={state.retrieval_cost}")
+            for row in scores: print({key: value for key, value in row.items() if key != "preview_ids"})
+        stop, reason = should_stop(state, stopping_config)
+        if stop: break
+    metrics = evidence_metrics(state.history, state.evidence_ids, example.supporting_ids, top_k)
+    return {"id": example.id, "method": "adaptive", **metrics, "steps": state.iteration, "candidate_evaluation_cost": state.candidate_evaluation_cost, "selected_retrieval_cost": state.selected_retrieval_cost, "retrieval_cost": state.retrieval_cost, "stopping_reason": reason, "retrieved_ids": " ".join(state.evidence_ids), "state": state.to_dict()}
