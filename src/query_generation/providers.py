@@ -73,17 +73,17 @@ class HuggingFaceLocalProvider:
             import torch
             messages = [{"role": "system", "content": "Return one valid JSON object only. Do not add prose or markdown."}, {"role": "user", "content": prompt}]
             if getattr(self.tokenizer, "chat_template", None):
-                inputs = self.tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_tensors="pt")
+                inputs = self.tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_dict=True, return_tensors="pt")
             else:
-                inputs = self.tokenizer("\n".join(item["content"] for item in messages), return_tensors="pt").input_ids
+                inputs = self.tokenizer("\n".join(item["content"] for item in messages), return_tensors="pt")
             device = next(self.model.parameters()).device
             inputs = inputs.to(device)
             generation = {"max_new_tokens": self.max_new_tokens, "do_sample": self.do_sample, "pad_token_id": self.tokenizer.eos_token_id}
             if self.do_sample:
                 generation["temperature"] = self.temperature
             with torch.inference_mode():
-                output = self.model.generate(inputs, **generation)
-            generated = output[0][inputs.shape[-1]:]
+                output = self.model.generate(**inputs, **generation)
+            generated = output[0][inputs["input_ids"].shape[-1]:]
             text = self.tokenizer.decode(generated, skip_special_tokens=True)
             value = _json_object(text)
             self.events.append({"kind": "generation", "model_id": self.model_id, "success": True, "seconds": round(time.perf_counter() - started, 4), "settings": self.generation_settings()})

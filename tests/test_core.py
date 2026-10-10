@@ -9,6 +9,10 @@ from src.evaluation.metrics import evidence_metrics
 from baselines.one_shot_rag import run_one_shot
 from baselines.react import run_react_style
 from src.query_generation.providers import _json_object, build_provider
+from src.query_generation.providers import HuggingFaceLocalProvider
+from contextlib import nullcontext
+from types import SimpleNamespace
+import sys
 
 
 class FakeProvider:
@@ -70,3 +74,34 @@ def test_local_provider_configuration_and_json_parser_without_model_download():
     assert _json_object("prefix ```json\n{\"queries\":[\"a\"]}\n```") == {"queries": ["a"]}
     provider = build_provider({"enabled": True, "provider": "huggingface_local", "strict": True, "models": []}, {"id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0", "trust_remote_code": False})
     assert provider.model_id.endswith("Chat-v1.0") and provider.strict
+
+
+def test_local_provider_passes_batch_encoding_as_generate_keywords(monkeypatch):
+    class InputIds(list):
+        shape = (1, 2)
+
+    class BatchEncoding(dict):
+        def to(self, device):
+            self.device = device
+            return self
+
+    class Tokenizer:
+        chat_template = "chat"
+        eos_token_id = 0
+        def apply_chat_template(self, *args, **kwargs):
+            return BatchEncoding(input_ids=InputIds([1, 2]))
+        def decode(self, tokens, skip_special_tokens=True):
+            return '{"queries":["ISRO country"]}'
+
+    class Model:
+        def __init__(self): self.kwargs = None
+        def parameters(self): return iter([SimpleNamespace(device="cpu")])
+        def generate(self, **kwargs):
+            self.kwargs = kwargs
+            return [[1, 2, 3, 4]]
+
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(inference_mode=lambda: nullcontext()))
+    provider = HuggingFaceLocalProvider("fake")
+    provider.model, provider.tokenizer = Model(), Tokenizer()
+    assert provider.complete_json("test") == {"queries": ["ISRO country"]}
+    assert provider.model.kwargs["input_ids"] == [1, 2]
