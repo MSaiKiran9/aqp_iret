@@ -82,9 +82,10 @@ class HuggingFaceLocalProvider:
         started = time.perf_counter()
         raw_outputs = []
         try:
-            messages = [{"role": "system", "content": "Return exactly one valid JSON object matching the requested schema. No Markdown fences, prose, or extra keys."}, {"role": "user", "content": prompt}]
+            system = {"role": "system", "content": "Output only the requested JSON object. No explanation or Markdown."}
+            messages = [system, {"role": "user", "content": prompt}]
             for attempt in range(2):
-                text, new_token_count = self._generate_text(messages, self.max_new_tokens if attempt == 0 else min(64, self.max_new_tokens))
+                text, new_token_count = self._generate_text(messages, self.max_new_tokens)
                 diagnostic = _output_diagnostic(text, new_token_count)
                 raw_outputs.append(diagnostic)
                 try:
@@ -94,7 +95,7 @@ class HuggingFaceLocalProvider:
                 except ValueError as error:
                     self.events.append({"kind": "generation_attempt", "model_id": self.model_id, "success": False, "attempt": attempt + 1, "error": str(error), "output": diagnostic})
                     if attempt == 0:
-                        messages.extend([{"role": "assistant", "content": text}, {"role": "user", "content": "Your previous output was invalid. Return only one valid JSON object matching the requested schema."}])
+                        messages = [system, {"role": "user", "content": "Return only the JSON object requested below. Do not continue or discuss any prior response.\n" + prompt}]
                         continue
                     raise
         except Exception as error:

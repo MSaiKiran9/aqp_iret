@@ -27,14 +27,15 @@ def _fallback_need(question: str, state) -> dict:
 def get_missing_information(question: str, state, provider: JsonCompleter | None = None) -> dict:
     """Use configured LLM structured output; fall back deterministically when unavailable."""
     if provider:
-        prompt = ("Analyze remaining retrieval need for multi-hop QA. Return exactly one JSON object with this schema: "
-                  '{"known_facts":["..."],"missing_information":"...","target_terms":["..."],"coverage":0.0}. '
-                  "Do not use Markdown fences, commentary, or extra keys. coverage must be a number from 0 to 1.\n"
+        prompt = ("Return only this JSON object, replacing example values: "
+                  '{"known_facts":["fact"],"missing_information":"needed fact","target_terms":["term"],"coverage":0.0}\n'
                   f"Question: {question}\nEvidence: {[d.text for d in state.accumulated_evidence]}")
         try:
             data = provider.complete_json(prompt)
-            if isinstance(data.get("target_terms"), list) and isinstance(data.get("coverage"), (int, float)):
-                return {"known_facts": [str(x) for x in data.get("known_facts", [])], "missing_information": str(data.get("missing_information", "")), "target_terms": [str(x) for x in data["target_terms"]], "coverage": max(0.0, min(1.0, float(data["coverage"]))), "source": "llm"}
+            if _valid_information_need(data):
+                return {"known_facts": [str(x) for x in data["known_facts"]], "missing_information": data["missing_information"], "target_terms": [str(x) for x in data["target_terms"]], "coverage": float(data["coverage"]), "source": "llm"}
+            if getattr(provider, "strict", False):
+                raise ValueError("Model JSON did not match the information-need schema.")
         except (RuntimeError, ValueError, KeyError, TypeError):
             if getattr(provider, "strict", False):
                 raise
@@ -43,9 +44,9 @@ def get_missing_information(question: str, state, provider: JsonCompleter | None
 
 def generate_candidates(question: str, state, need: dict, count: int, provider: JsonCompleter | None = None) -> list[str]:
     if provider:
-        prompt = ("Generate concise, diverse retrieval queries for multi-hop QA. Return exactly one JSON object with this schema: "
-                  '{"queries":["query one","query two"]}. '
-                  f"Return at most {count} queries. Do not use Markdown fences, commentary, or extra keys.\n"
+        prompt = ("Return only this JSON object, replacing example values: "
+                  '{"queries":["entity relation","entity location"]}\n'
+                  f"Return at most {count} concise queries.\n"
                   f"Question: {question}\nEvidence: {[d.text for d in state.accumulated_evidence]}\nRemaining need: {need}")
         try:
             queries = [str(q).strip() for q in provider.complete_json(prompt).get("queries", []) if _valid_query(str(q))]
@@ -65,3 +66,10 @@ def generate_candidates(question: str, state, need: dict, count: int, provider: 
 def _valid_query(value: str) -> bool:
     query = value.strip()
     return 2 <= len(query.split()) <= 20 and len(query) <= 200 and not any(marker in query for marker in ("{", "}", "\n"))
+
+
+def _valid_information_need(data: dict) -> bool:
+    required = {"known_facts", "missing_information", "target_terms", "coverage"}
+    return (required <= set(data) and isinstance(data["known_facts"], list) and isinstance(data["missing_information"], str)
+            and isinstance(data["target_terms"], list) and isinstance(data["coverage"], (int, float))
+            and 0 <= float(data["coverage"]) <= 1)

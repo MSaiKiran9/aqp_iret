@@ -18,7 +18,7 @@ import pytest
 
 class FakeProvider:
     def complete_json(self, prompt):
-        if "Analyze" in prompt:
+        if '"known_facts"' in prompt:
             return {"known_facts": [], "missing_information": "country relation", "target_terms": ["ISRO", "country"], "coverage": 0.2}
         return {"queries": ["ISRO country", "Indian Space Research Organisation country", "ISRO national agency"]}
 
@@ -40,6 +40,16 @@ def test_generation_bm25_and_normalized_planner_scores():
     assert len(candidates) == 3 and selected["query"] in candidates
     assert all(0 <= row[key] <= 1 for row in scores for key in ("relevance", "missing", "redundancy", "cost"))
     assert retriever.search("Chandrayaan-3", 2)[0][0].id == "d3" or retriever.search("Chandrayaan-3", 2)[0][0].id == "d1"
+
+
+def test_strict_information_need_rejects_schema_invalid_json():
+    class InvalidSchemaProvider:
+        strict = True
+        def complete_json(self, prompt): return {"target_terms": [], "coverage": 0.5}
+
+    example, _, _, _ = components()
+    with pytest.raises(ValueError, match="schema"):
+        get_missing_information(example.question, EvidenceState(example.question), InvalidSchemaProvider())
 
 
 def test_state_redundancy_and_budget_accounting():
@@ -77,6 +87,7 @@ def test_local_provider_configuration_and_json_parser_without_model_download():
     assert _json_object("  \n {\"queries\":[\"a\"]} \n") == {"queries": ["a"]}
     assert _json_object("Answer: {\"queries\":[\"a\"]}") == {"queries": ["a"]}
     with pytest.raises(ValueError): _json_object('{"queries":}')
+    with pytest.raises(ValueError): _json_object('{"queries":["a"]')
     with pytest.raises(ValueError): _json_object("")
     provider = build_provider({"enabled": True, "provider": "huggingface_local", "strict": True, "models": []}, {"id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0", "trust_remote_code": False})
     assert provider.model_id.endswith("Chat-v1.0") and provider.strict
@@ -127,8 +138,11 @@ def test_local_provider_retains_empty_generation_diagnostics(monkeypatch):
         def decode(self, tokens, skip_special_tokens=True): return ""
 
     class Model:
+        def __init__(self): self.budgets = []
         def parameters(self): return iter([SimpleNamespace(device="cpu")])
-        def generate(self, **kwargs): return [[1, 2]]
+        def generate(self, **kwargs):
+            self.budgets.append(kwargs["max_new_tokens"])
+            return [[1, 2]]
 
     monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(inference_mode=lambda: nullcontext()))
     provider = HuggingFaceLocalProvider("tinyllama-fake")
@@ -137,5 +151,6 @@ def test_local_provider_retains_empty_generation_diagnostics(monkeypatch):
         provider.complete_json("schema prompt")
     attempts = [event for event in provider.events if event["kind"] == "generation_attempt"]
     assert len(attempts) == 2
+    assert provider.model.budgets == [provider.max_new_tokens, provider.max_new_tokens]
     assert all(event["output"]["raw_output_length"] == 0 and event["output"]["new_token_count"] == 0 for event in attempts)
     assert provider.events[-1]["raw_outputs"] == [event["output"] for event in attempts]
