@@ -105,7 +105,7 @@ def main():
                     (directories["traces"] / safe_name(model_id) / method / f"{example.id}_{args.run_id}.json").write_text(json.dumps(record.get("state", {}), indent=2), encoding="utf-8")
                 all_records.extend(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
         except Exception as error:
-            failure = {"run_id": args.run_id, "model_id": model_id, "status": "failed", "error": repr(error), "traceback": traceback.format_exc()}
+            failure = {"run_id": args.run_id, "model_id": model_id, "status": "failed", "error": repr(error), "traceback": traceback.format_exc(), "provider_events": getattr(provider, "events", [])}
             failures.append(failure); append_record(directories["failures"] / f"{args.run_id}.jsonl", failure)
         finally:
             if provider:

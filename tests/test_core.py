@@ -75,6 +75,7 @@ def test_local_provider_configuration_and_json_parser_without_model_download():
     assert _json_object('{"queries":["a"]}') == {"queries": ["a"]}
     assert _json_object("```json\n{\"queries\":[\"a\"]}\n```") == {"queries": ["a"]}
     assert _json_object("  \n {\"queries\":[\"a\"]} \n") == {"queries": ["a"]}
+    assert _json_object("Answer: {\"queries\":[\"a\"]}") == {"queries": ["a"]}
     with pytest.raises(ValueError): _json_object('{"queries":}')
     with pytest.raises(ValueError): _json_object("")
     provider = build_provider({"enabled": True, "provider": "huggingface_local", "strict": True, "models": []}, {"id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0", "trust_remote_code": False})
@@ -110,3 +111,31 @@ def test_local_provider_passes_batch_encoding_as_generate_keywords(monkeypatch):
     provider.model, provider.tokenizer = Model(), Tokenizer()
     assert provider.complete_json("test") == {"queries": ["ISRO country"]}
     assert provider.model.kwargs["input_ids"] == [1, 2]
+
+
+def test_local_provider_retains_empty_generation_diagnostics(monkeypatch):
+    class InputIds(list):
+        shape = (1, 2)
+
+    class BatchEncoding(dict):
+        def to(self, device): return self
+
+    class Tokenizer:
+        chat_template = "tinyllama-chat-template"
+        eos_token_id = 0
+        def apply_chat_template(self, *args, **kwargs): return BatchEncoding(input_ids=InputIds([1, 2]))
+        def decode(self, tokens, skip_special_tokens=True): return ""
+
+    class Model:
+        def parameters(self): return iter([SimpleNamespace(device="cpu")])
+        def generate(self, **kwargs): return [[1, 2]]
+
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(inference_mode=lambda: nullcontext()))
+    provider = HuggingFaceLocalProvider("tinyllama-fake")
+    provider.model, provider.tokenizer = Model(), Tokenizer()
+    with pytest.raises(RuntimeError, match="empty"):
+        provider.complete_json("schema prompt")
+    attempts = [event for event in provider.events if event["kind"] == "generation_attempt"]
+    assert len(attempts) == 2
+    assert all(event["output"]["raw_output_length"] == 0 and event["output"]["new_token_count"] == 0 for event in attempts)
+    assert provider.events[-1]["raw_outputs"] == [event["output"] for event in attempts]
