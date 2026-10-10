@@ -27,8 +27,9 @@ def _fallback_need(question: str, state) -> dict:
 def get_missing_information(question: str, state, provider: JsonCompleter | None = None) -> dict:
     """Use configured LLM structured output; fall back deterministically when unavailable."""
     if provider:
-        prompt = ("Analyze remaining retrieval need for multi-hop QA. Return JSON with known_facts (list), "
-                  "missing_information (string), target_terms (list), coverage (number 0..1).\n"
+        prompt = ("Analyze remaining retrieval need for multi-hop QA. Return exactly one JSON object with this schema: "
+                  '{"known_facts":["..."],"missing_information":"...","target_terms":["..."],"coverage":0.0}. '
+                  "Do not use Markdown fences, commentary, or extra keys. coverage must be a number from 0 to 1.\n"
                   f"Question: {question}\nEvidence: {[d.text for d in state.accumulated_evidence]}")
         try:
             data = provider.complete_json(prompt)
@@ -42,8 +43,10 @@ def get_missing_information(question: str, state, provider: JsonCompleter | None
 
 def generate_candidates(question: str, state, need: dict, count: int, provider: JsonCompleter | None = None) -> list[str]:
     if provider:
-        prompt = ("Generate concise, diverse retrieval queries for multi-hop QA. Return JSON {queries:[...]}; "
-                  f"return at most {count} queries.\nQuestion: {question}\nEvidence: {[d.text for d in state.accumulated_evidence]}\nRemaining need: {need}")
+        prompt = ("Generate concise, diverse retrieval queries for multi-hop QA. Return exactly one JSON object with this schema: "
+                  '{"queries":["query one","query two"]}. '
+                  f"Return at most {count} queries. Do not use Markdown fences, commentary, or extra keys.\n"
+                  f"Question: {question}\nEvidence: {[d.text for d in state.accumulated_evidence]}\nRemaining need: {need}")
         try:
             queries = [str(q).strip() for q in provider.complete_json(prompt).get("queries", []) if _valid_query(str(q))]
             if queries:

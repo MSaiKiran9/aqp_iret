@@ -13,6 +13,7 @@ from src.query_generation.providers import HuggingFaceLocalProvider
 from contextlib import nullcontext
 from types import SimpleNamespace
 import sys
+import pytest
 
 
 class FakeProvider:
@@ -71,7 +72,11 @@ def test_baselines_metrics_and_adaptive_end_to_end():
 
 
 def test_local_provider_configuration_and_json_parser_without_model_download():
-    assert _json_object("prefix ```json\n{\"queries\":[\"a\"]}\n```") == {"queries": ["a"]}
+    assert _json_object('{"queries":["a"]}') == {"queries": ["a"]}
+    assert _json_object("```json\n{\"queries\":[\"a\"]}\n```") == {"queries": ["a"]}
+    assert _json_object("  \n {\"queries\":[\"a\"]} \n") == {"queries": ["a"]}
+    with pytest.raises(ValueError): _json_object('{"queries":}')
+    with pytest.raises(ValueError): _json_object("")
     provider = build_provider({"enabled": True, "provider": "huggingface_local", "strict": True, "models": []}, {"id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0", "trust_remote_code": False})
     assert provider.model_id.endswith("Chat-v1.0") and provider.strict
 

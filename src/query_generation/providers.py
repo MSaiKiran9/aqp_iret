@@ -13,8 +13,14 @@ class LLMProvider(Protocol):
 
 
 def _json_object(text: str) -> dict:
-    """Extract the first valid JSON object from common chat-model output formats."""
-    cleaned = text.strip().replace("```json", "").replace("```", "").strip()
+    """Extract a valid JSON object, including one wrapped in a Markdown fence."""
+    cleaned = text.strip()
+    if not cleaned:
+        raise ValueError("Model output was empty.")
+    if cleaned.startswith("```") and cleaned.endswith("```"):
+        parts = cleaned.split("\n", 1)
+        if len(parts) == 2:
+            cleaned = parts[1].rsplit("```", 1)[0].strip()
     decoder = json.JSONDecoder()
     for index, char in enumerate(cleaned):
         if char == "{":
@@ -25,6 +31,10 @@ def _json_object(text: str) -> dict:
             except json.JSONDecodeError:
                 continue
     raise ValueError("Model output did not contain a valid JSON object.")
+
+
+def _safe_output(text: str | None, limit: int = 1000) -> str:
+    return (text or "")[:limit]
 
 
 @dataclass
@@ -69,28 +79,39 @@ class HuggingFaceLocalProvider:
     def complete_json(self, prompt: str) -> dict:
         self._load()
         started = time.perf_counter()
+        raw_outputs = []
         try:
-            import torch
-            messages = [{"role": "system", "content": "Return one valid JSON object only. Do not add prose or markdown."}, {"role": "user", "content": prompt}]
-            if getattr(self.tokenizer, "chat_template", None):
-                inputs = self.tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_dict=True, return_tensors="pt")
-            else:
-                inputs = self.tokenizer("\n".join(item["content"] for item in messages), return_tensors="pt")
-            device = next(self.model.parameters()).device
-            inputs = inputs.to(device)
-            generation = {"max_new_tokens": self.max_new_tokens, "do_sample": self.do_sample, "pad_token_id": self.tokenizer.eos_token_id}
-            if self.do_sample:
-                generation["temperature"] = self.temperature
-            with torch.inference_mode():
-                output = self.model.generate(**inputs, **generation)
-            generated = output[0][inputs["input_ids"].shape[-1]:]
-            text = self.tokenizer.decode(generated, skip_special_tokens=True)
-            value = _json_object(text)
-            self.events.append({"kind": "generation", "model_id": self.model_id, "success": True, "seconds": round(time.perf_counter() - started, 4), "settings": self.generation_settings()})
-            return value
+            messages = [{"role": "system", "content": "Return exactly one valid JSON object matching the requested schema. No Markdown fences, prose, or extra keys."}, {"role": "user", "content": prompt}]
+            for attempt in range(2):
+                text = self._generate_text(messages, self.max_new_tokens if attempt == 0 else min(64, self.max_new_tokens))
+                raw_outputs.append(text)
+                try:
+                    value = _json_object(text)
+                    self.events.append({"kind": "generation", "model_id": self.model_id, "success": True, "seconds": round(time.perf_counter() - started, 4), "attempt": attempt + 1, "settings": self.generation_settings()})
+                    return value
+                except ValueError as error:
+                    self.events.append({"kind": "generation_attempt", "model_id": self.model_id, "success": False, "attempt": attempt + 1, "error": str(error), "raw_output": _safe_output(text)})
+                    if attempt == 0:
+                        messages.extend([{"role": "assistant", "content": text}, {"role": "user", "content": "Your previous output was invalid. Return only one valid JSON object matching the requested schema."}])
+                        continue
+                    raise
         except Exception as error:
-            self.events.append({"kind": "generation", "model_id": self.model_id, "success": False, "error": repr(error), "seconds": round(time.perf_counter() - started, 4), "settings": self.generation_settings()})
+            self.events.append({"kind": "generation", "model_id": self.model_id, "success": False, "error": repr(error), "raw_outputs": [_safe_output(item) for item in raw_outputs], "seconds": round(time.perf_counter() - started, 4), "settings": self.generation_settings()})
             raise RuntimeError(f"{self.model_id} produced no valid structured output: {error}") from error
+
+    def _generate_text(self, messages: list[dict], max_new_tokens: int) -> str:
+        import torch
+        if getattr(self.tokenizer, "chat_template", None):
+            inputs = self.tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_dict=True, return_tensors="pt")
+        else:
+            inputs = self.tokenizer("\n".join(item["content"] for item in messages), return_tensors="pt")
+        inputs = inputs.to(next(self.model.parameters()).device)
+        generation = {"max_new_tokens": max_new_tokens, "do_sample": self.do_sample, "pad_token_id": self.tokenizer.eos_token_id}
+        if self.do_sample:
+            generation["temperature"] = self.temperature
+        with torch.inference_mode():
+            output = self.model.generate(**inputs, **generation)
+        return self.tokenizer.decode(output[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True)
 
     def generation_settings(self) -> dict:
         return {"max_new_tokens": self.max_new_tokens, "temperature": self.temperature, "do_sample": self.do_sample}
