@@ -38,6 +38,22 @@ def _output_diagnostic(text: str, new_token_count: int, limit: int = 1000) -> di
     return {"raw_output_repr": repr(excerpt), "raw_output_length": len(text), "raw_output_truncated": len(text) > limit, "new_token_count": new_token_count}
 
 
+def _patch_cache_compatibility() -> None:
+    """Ensure Transformers Cache classes support legacy attributes used by Phi-3.5 remote code."""
+    try:
+        from transformers.cache_utils import Cache, DynamicCache
+        if not hasattr(Cache, "seen_tokens"):
+            Cache.seen_tokens = property(lambda self: self.get_seq_length() if hasattr(self, "get_seq_length") else getattr(self, "_seen_tokens", None))
+        if not hasattr(Cache, "get_max_length"):
+            Cache.get_max_length = lambda self: None
+        if not hasattr(DynamicCache, "seen_tokens"):
+            DynamicCache.seen_tokens = property(lambda self: self.get_seq_length() if hasattr(self, "get_seq_length") else getattr(self, "_seen_tokens", None))
+        if not hasattr(DynamicCache, "get_max_length"):
+            DynamicCache.get_max_length = lambda self: None
+    except (ImportError, AttributeError):
+        pass
+
+
 @dataclass
 class HuggingFaceLocalProvider:
     model_id: str
@@ -60,6 +76,7 @@ class HuggingFaceLocalProvider:
         try:
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer
+            _patch_cache_compatibility()
             selected_device = "cuda" if self.device == "auto" and torch.cuda.is_available() else ("cpu" if self.device == "auto" else self.device)
             dtype = torch.float32
             if selected_device.startswith("cuda"):

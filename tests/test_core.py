@@ -8,7 +8,7 @@ from src.pipeline import run_adaptive
 from src.evaluation.metrics import evidence_metrics
 from baselines.one_shot_rag import run_one_shot
 from baselines.react import run_react_style
-from src.query_generation.providers import _json_object, build_provider
+from src.query_generation.providers import _json_object, build_provider, _patch_cache_compatibility
 from src.query_generation.providers import HuggingFaceLocalProvider
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -154,3 +154,28 @@ def test_local_provider_retains_empty_generation_diagnostics(monkeypatch):
     assert provider.model.budgets == [provider.max_new_tokens, provider.max_new_tokens]
     assert all(event["output"]["raw_output_length"] == 0 and event["output"]["new_token_count"] == 0 for event in attempts)
     assert provider.events[-1]["raw_outputs"] == [event["output"] for event in attempts]
+
+
+def test_cache_compatibility_patch_for_legacy_cache_models(monkeypatch):
+    class FakeCacheBase:
+        pass
+
+    class FakeDynamicCache(FakeCacheBase):
+        def __init__(self, length=5):
+            self._len = length
+        def get_seq_length(self):
+            return self._len
+
+    fake_cache_utils = SimpleNamespace(Cache=FakeCacheBase, DynamicCache=FakeDynamicCache)
+    fake_transformers = SimpleNamespace(cache_utils=fake_cache_utils)
+    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+    monkeypatch.setitem(sys.modules, "transformers.cache_utils", fake_cache_utils)
+
+    _patch_cache_compatibility()
+
+    cache_instance = FakeDynamicCache(length=12)
+    assert hasattr(cache_instance, "seen_tokens")
+    assert cache_instance.seen_tokens == 12
+    assert hasattr(cache_instance, "get_max_length")
+    assert cache_instance.get_max_length() is None
+
