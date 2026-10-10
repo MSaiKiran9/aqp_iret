@@ -29,16 +29,13 @@ python experiments/run_experiment.py
 
 The default `demo` configuration is an offline two-question development set. Outputs are written to a timestamped folder under `results/` and include raw JSON, per-question CSVs, summaries, `comparison.csv`, and `comparison.png`.
 
-## LLM Query Generation
+## Local Hugging Face LLM Query Generation
 
-The normal configurable generator is an OpenAI-compatible JSON provider implemented in `src/query_generation/providers.py`. Set `llm.enabled: true` in `config.yaml` and configure credentials without committing them:
+Actual experiments use `transformers` and PyTorch locally in the runtime, with no hosted or paid inference API. The configured models are `Qwen/Qwen2.5-1.5B-Instruct`, `TinyLlama/TinyLlama-1.1B-Chat-v1.0`, `HuggingFaceTB/SmolLM2-1.7B-Instruct`, and `microsoft/Phi-3.5-mini-instruct`. The provider loads a tokenizer and causal model from Hugging Face, applies the tokenizer chat template when provided, asks for JSON, validates extracted JSON, and records loading/generation events. Phi is configured with `trust_remote_code: true` because its model card documents that requirement; the others use the standard Transformers path. [Qwen](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct), [TinyLlama](https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0), [SmolLM2](https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct), and [Phi-3.5](https://huggingface.co/microsoft/Phi-3.5-mini-instruct) publish Transformers loading guidance on their model cards.
 
-```powershell
-$env:OPENAI_API_KEY = "your-key"
-python experiments/run_experiment.py
-```
+The provider loads one model at a time and calls `release()` plus CUDA cache cleanup before the next. A Colab GPU is strongly recommended; Phi-3.5-mini is the largest selected model and may be impractical on a free T4 without sufficient VRAM. All model downloads are cached by Hugging Face but model weights are not committed.
 
-The provider receives the question, accumulated evidence, and current structured information need; it returns JSON candidate queries and structured missing information. `llm.enabled: false` uses a deterministic evidence-aware fallback so tests and offline runs remain reproducible. This fallback is for development only, not the intended research configuration.
+`llm.enabled: false` keeps the deterministic fallback for offline tests and development only. With `llm.enabled: true` and `llm.strict: true`, a model-load, generation, or JSON-validation failure is recorded and fails that model run; it is never silently converted into a successful fallback experiment.
 
 ## Dataset Setup
 
@@ -73,15 +70,29 @@ Stopping is inference-only: it enforces the budget before another iteration, max
 
 All settings are in `config.yaml`: dataset/split/sample size, seed, BM25 `top_k`, candidate count, LLM provider/model, weights, enabled planner components, stopping thresholds, budget, and output path. Remove a component name from `planner.enabled` for ablations, for example `enabled: [relevance, missing, redundancy]`.
 
-## Colab
+## Colab and Google Drive Results
 
-Open `notebooks/adaptive_query_planning_colab.ipynb`. It prompts for your real GitHub repository URL, installs dependencies, optionally reads `OPENAI_API_KEY` from Colab Secrets, prepares a small HotpotQA validation subset, runs tests and all three methods, then writes tables and plots.
+Open [the existing notebook](notebooks/adaptive_query_planning_colab.ipynb) from `https://github.com/MSaiKiran9/aqp_iret`, select a GPU runtime, and run its cells in order. It clones the repository, mounts Drive, and creates this exact output root:
+
+`/content/drive/MyDrive/AQP_IRET_Research_Results/`
+
+It stores `configs`, `logs`, `model_metadata`, `raw_results`, `traces`, `summaries`, `comparisons`, `plots`, and `failures` beneath that folder. The default first run is a one-question actual-Hugging-Face smoke test with TinyLlama. Review its raw JSONL, trace, event log, and model metadata before setting `RUN_FULL_EVALUATION = True`.
+
+The full cell invokes one model per process and releases memory after each. It uses a single `RUN_ID`; re-running a model with that same ID skips already written question records, making interrupted Colab work resumable. Comparison files are rebuilt from all raw records for the matching run ID. One-Shot RAG is retrieval-only, so it is saved once per run rather than redundantly executed once per LLM.
+
+Local equivalent:
+
+```powershell
+python experiments/run_hf_experiments.py --config config_hotpotqa_dev.yaml --output drive_results --models TinyLlama/TinyLlama-1.1B-Chat-v1.0 --smoke
+```
+
+Run all configured models sequentially by invoking the command once per model with a shared `--run-id`. It writes per-question JSONL incrementally, explicit failure JSONL records, model load metadata, `model_comparison.csv`, `method_comparison.csv`, `model_method_comparison.csv`, `per_question_results.csv`, `comparison_summary.json`, and `comparison_dashboard.png` from actual saved data.
 
 ## Project Structure
 
 - `src/data`: dataset adapters and demo corpus
 - `src/retrieval`: deterministic BM25
-- `src/query_generation`: LLM provider and offline fallback
+- `src/query_generation`: local Transformers provider and offline fallback
 - `src/planner`: transparent scoring
 - `src/evidence`, `src/stopping`: state and inference-only stopping
 - `baselines`: one-shot and simplified ReAct-style methods
@@ -90,4 +101,4 @@ Open `notebooks/adaptive_query_planning_colab.ipynb`. It prompts for your real G
 
 ## Limitations
 
-The deterministic fallback is intentionally lightweight and not a substitute for LLM-based information-need analysis. BM25 candidate previews make adaptive planning costlier than one-shot retrieval; the cost is reported rather than hidden. Results on a small development subset are preliminary and must not be interpreted as evidence of superiority or statistical significance.
+The deterministic fallback is intentionally lightweight and not a substitute for LLM-based information-need analysis. Smaller models can produce invalid JSON or weak queries; such failures are logged instead of masked. BM25 candidate previews make adaptive planning costlier than one-shot retrieval; the cost is reported rather than hidden. Results on a small development subset are preliminary and must not be interpreted as evidence of superiority or statistical significance.

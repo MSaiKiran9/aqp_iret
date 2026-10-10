@@ -12,11 +12,16 @@ query_generation:
   candidate_count: 3
 llm:
   enabled: false
-  provider: openai_compatible
-  model: gpt-4o-mini
-  api_key_env: OPENAI_API_KEY
-  base_url: https://api.openai.com/v1/chat/completions
-  timeout_seconds: 30
+  provider: huggingface_local
+  strict: true
+  device: auto
+  precision: auto
+  max_new_tokens: 192
+  temperature: 0.2
+  do_sample: false
+  models:
+    - id: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+      trust_remote_code: false
 planner:
   relevance_weight: 0.45
   missing_information_weight: 0.35

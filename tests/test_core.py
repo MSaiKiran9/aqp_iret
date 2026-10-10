@@ -8,6 +8,7 @@ from src.pipeline import run_adaptive
 from src.evaluation.metrics import evidence_metrics
 from baselines.one_shot_rag import run_one_shot
 from baselines.react import run_react_style
+from src.query_generation.providers import _json_object, build_provider
 
 
 class FakeProvider:
@@ -63,3 +64,9 @@ def test_baselines_metrics_and_adaptive_end_to_end():
     assert adaptive["steps"] >= 2 and adaptive["retrieval_cost"] <= stop.retrieval_budget
     assert adaptive["candidate_evaluation_cost"] > 0 and adaptive["state"]["history"]
     assert evidence_metrics([{"retrieved_ids": ["d1"]}], ["d1"], ["d1", "d2"], 1)["first_step_recall_at_k"] == .5
+
+
+def test_local_provider_configuration_and_json_parser_without_model_download():
+    assert _json_object("prefix ```json\n{\"queries\":[\"a\"]}\n```") == {"queries": ["a"]}
+    provider = build_provider({"enabled": True, "provider": "huggingface_local", "strict": True, "models": []}, {"id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0", "trust_remote_code": False})
+    assert provider.model_id.endswith("Chat-v1.0") and provider.strict

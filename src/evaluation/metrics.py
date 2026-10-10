@@ -18,7 +18,7 @@ def evidence_metrics(history: list[dict], accumulated_ids: list[str], supporting
 def summarise(records: list[dict]) -> dict:
     count = len(records) or 1
     reasons = {reason: sum(record["stopping_reason"] == reason for record in records) for reason in sorted({r["stopping_reason"] for r in records})}
-    return {"questions": len(records), "evidence_recall_at_k": round(sum(r["best_step_recall_at_k"] for r in records) / count, 4), "accumulated_evidence_recall": round(sum(r["accumulated_evidence_recall"] for r in records) / count, 4), "average_retrieval_steps": round(sum(r["steps"] for r in records) / count, 4), "average_retrieval_cost": round(sum(r["retrieval_cost"] for r in records) / count, 4), "successful_evidence_cases": sum(r["accumulated_evidence_recall"] == 1 for r in records), "stopping_reasons": reasons}
+    return {"questions": len(records), "evidence_recall_at_k": round(sum(r["best_step_recall_at_k"] for r in records) / count, 4), "accumulated_evidence_recall": round(sum(r["accumulated_evidence_recall"] for r in records) / count, 4), "average_retrieval_steps": round(sum(r["steps"] for r in records) / count, 4), "average_retrieval_cost": round(sum(r["retrieval_cost"] for r in records) / count, 4), "average_generation_latency_seconds": round(sum(r.get("generation_latency_seconds", 0.0) for r in records) / count, 4), "average_retrieval_latency_seconds": round(sum(r.get("retrieval_latency_seconds", 0.0) for r in records) / count, 4), "average_end_to_end_latency_seconds": round(sum(r.get("end_to_end_latency_seconds", 0.0) for r in records) / count, 4), "successful_evidence_cases": sum(r["accumulated_evidence_recall"] == 1 for r in records), "stopping_reasons": reasons}
 
 
 def save_results(records: list[dict], summary: dict, output_dir: str | Path, name: str, config: dict | None = None):
@@ -27,7 +27,7 @@ def save_results(records: list[dict], summary: dict, output_dir: str | Path, nam
     (path / f"{name}_raw.json").write_text(json.dumps(records, indent=2), encoding="utf-8")
     if config is not None:
         (path / "config_used.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
-    fields = ["id", "method", "first_step_recall_at_k", "best_step_recall_at_k", "accumulated_evidence_recall", "steps", "candidate_evaluation_cost", "selected_retrieval_cost", "retrieval_cost", "stopping_reason", "retrieved_ids"]
+    fields = ["id", "method", "model_id", "first_step_recall_at_k", "best_step_recall_at_k", "accumulated_evidence_recall", "steps", "candidate_evaluation_cost", "selected_retrieval_cost", "retrieval_cost", "generation_latency_seconds", "retrieval_latency_seconds", "end_to_end_latency_seconds", "stopping_reason", "retrieved_ids"]
     with (path / f"{name}_records.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
         writer.writeheader(); writer.writerows(records)

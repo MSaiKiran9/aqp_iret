@@ -6,4 +6,6 @@ venv/
 data/raw/
 data/processed/
 results*/
+drive_results/
+hf_cache/
 .ipynb_checkpoints/
