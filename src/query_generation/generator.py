@@ -18,7 +18,11 @@ def _entities(text: str) -> list[str]:
 def _fallback_need(question: str, state) -> dict:
     observed = _entities(" ".join(d.text for d in state.accumulated_evidence))
     question_entities = _entities(question)
-    targets = [token for token in tokenize(question) if token in {"country", "person", "organization", "city", "date", "year", "place"}]
+    targets = [token for token in tokenize(question) if token in {
+        "country", "person", "organization", "city", "date", "year", "place",
+        "author", "director", "founder", "film", "team", "college", "school",
+        "university", "state", "album", "band", "company", "location", "national", "agency"
+    }]
     focus = sorted(dict.fromkeys(observed), key=lambda value: (-len(value.split()), value))[:3] or question_entities
     coverage = min(1.0, len(state.accumulated_evidence) / 2) if state.iteration else 0.0
     return {"known_facts": observed[-5:], "missing_information": f"Find the {' and '.join(targets) or 'answer'} linked to {'; '.join(focus[:2]) or 'the question'}.", "target_terms": focus[:3] + targets, "coverage": coverage, "source": "deterministic_fallback"}
@@ -59,7 +63,7 @@ def generate_candidates(question: str, state, need: dict, count: int, provider: 
                 raise
     focus = " ".join(need.get("target_terms", [])[:2]) or " ".join(_entities(question)[:2]) or question
     target = " ".join(tokenize(need.get("missing_information", ""))[:4])
-    candidates = [f"{focus} {target}".strip(), f"{focus} relationship", question]
+    candidates = [f"{focus} {target}".strip(), f"{focus} relationship", f"{focus}".strip(), question]
     return [q for q in dict.fromkeys(candidates) if q and q not in set(state.query_history)][:count]
 
 

@@ -2,7 +2,7 @@ seed: 42
 dataset:
   name: hotpotqa
   split: validation
-  sample_size: 1
+  sample_size: 5
 retrieval:
   top_k: 2
   max_iterations: 3
@@ -35,4 +35,4 @@ stopping:
   no_gain_limit: 1
 output:
   directory: results_hotpotqa_dev
-verbose: false
+verbose: true

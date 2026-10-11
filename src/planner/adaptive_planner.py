@@ -29,12 +29,15 @@ class AdaptiveQueryPlanner:
         max_bm25 = max((score for _, results, _ in previews for _, score in results), default=0.0) or 1.0
         evidence_tokens = set(tokenize(" ".join(doc.text for doc in state.accumulated_evidence)))
         need_tokens = set(tokenize(" ".join(state.missing_information.get("target_terms", []))))
+        max_tokens = max((len(tokenize(q)) for q in candidates), default=1) or 1
         scores = []
         for query, results, elapsed in previews:
             relevance = max((score for _, score in results), default=0.0) / max_bm25
             missing = jaccard(set(tokenize(query)), need_tokens)
             redundancy = sum(jaccard(set(tokenize(doc.text)), evidence_tokens) for doc, _ in results) / max(1, len(results))
-            cost = len(results) / max(1, top_k)
+            preview_doc_cost = len(results) / max(1, top_k)
+            query_len_cost = len(tokenize(query)) / max_tokens
+            cost = 0.5 * preview_doc_cost + 0.5 * query_len_cost
             c = self.config
             total = (c.relevance_weight * relevance if "relevance" in c.enabled else 0.0) + (c.missing_information_weight * missing if "missing" in c.enabled else 0.0) - (c.redundancy_weight * redundancy if "redundancy" in c.enabled else 0.0) - (c.cost_weight * cost if "cost" in c.enabled else 0.0)
             scores.append({"query": query, "relevance": round(relevance, 4), "missing": round(missing, 4), "redundancy": round(redundancy, 4), "cost": round(cost, 4), "total": round(total, 4), "preview_ids": [doc.id for doc, _ in results], "preview_cost": len(results), "preview_seconds": round(elapsed, 6)})
@@ -42,4 +45,10 @@ class AdaptiveQueryPlanner:
 
     def select(self, candidates, state, top_k):
         scores = self.score_candidates(candidates, state, top_k)
-        return max(scores, key=lambda row: row["total"]), scores
+        best = max(scores, key=lambda row: row["total"])
+        best["selection_rationale"] = (
+            f"Selected candidate with highest total score ({best['total']}): "
+            f"relevance={best['relevance']}, missing_info={best['missing']}, "
+            f"redundancy_penalty={best['redundancy']}, cost_penalty={best['cost']}"
+        )
+        return best, scores
