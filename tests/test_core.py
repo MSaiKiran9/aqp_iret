@@ -201,7 +201,7 @@ def test_prompt_instructions_and_structured_candidate_generation():
     assert need["source"] == "llm"
     assert need["missing_information"] == "which university"
     assert "Do NOT answer the question" in recorded_calls[0][0]
-    assert recorded_calls[0][1] == 80
+    assert recorded_calls[0][1] == 160
 
     candidates = generate_candidates(state.question, state, need, 2, MockStructuredProvider())
     assert candidates == ["Tokarev university", "Sergei Tokarev professor"]
@@ -288,15 +288,15 @@ def test_end_to_end_call_path_tokens_and_placeholder_rejection(monkeypatch):
     model = Model()
     provider.model, provider.tokenizer = model, tokenizer
 
-    # 1. Missing information call should use 80 tokens
+    # 1. Missing information call should use 160 tokens
     tokenizer.responses = ['{"known_facts": ["Panchin is a researcher"], "missing_information": "university affiliation", "target_terms": ["Sergei Aleksandrovich Panchin", "university"], "coverage": 0.5}']
     state = EvidenceState("Where was Sergei Aleksandrovich Panchin a professor?")
     need = get_missing_information(state.question, state, provider)
 
     assert need["source"] == "llm"
-    assert model.generate_kwargs_history[-1]["max_new_tokens"] == 80
+    assert model.generate_kwargs_history[-1]["max_new_tokens"] == 160
     assert "temperature" not in model.generate_kwargs_history[-1]
-    assert provider.events[-1]["settings"]["max_new_tokens"] == 80
+    assert provider.events[-1]["settings"]["max_new_tokens"] == 160
     assert "temperature" not in provider.events[-1]["settings"]
 
     # 2. Candidate generation call should use 100 tokens and accept specific queries

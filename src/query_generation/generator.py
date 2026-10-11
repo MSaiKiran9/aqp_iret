@@ -50,7 +50,7 @@ def get_missing_information(question: str, state, provider: JsonCompleter | None
             "JSON:"
         )
         try:
-            data = _call_complete_json(provider, prompt, max_new_tokens=80)
+            data = _call_complete_json(provider, prompt, max_new_tokens=160)
             if _valid_information_need(data):
                 return {"known_facts": [str(x) for x in data["known_facts"]], "missing_information": str(data["missing_information"]), "target_terms": [str(x) for x in data["target_terms"]], "coverage": float(data["coverage"]), "source": "llm"}
             if getattr(provider, "strict", False):
