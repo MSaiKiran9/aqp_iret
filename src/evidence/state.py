@@ -38,7 +38,21 @@ class EvidenceState:
         self.candidate_evaluation_cost += evaluation_cost
         self.selected_retrieval_cost += len(results)
         rationale = next((s.get("selection_rationale") for s in scores if s.get("query") == query), None)
-        self.history.append({"iteration": self.iteration, "query": query, "selected_rationale": rationale, "retrieved_ids": [d.id for d, _ in results], "new_document_count": len(new_docs), "planner_scores": scores, "candidate_evaluation_cost": evaluation_cost, "selected_retrieval_cost": len(results), "missing_information": self.missing_information})
+        candidate_queries = [s["query"] for s in scores] if scores else [query]
+        self.history.append({
+            "iteration": self.iteration,
+            "query": query,
+            "selected_query": query,
+            "selected_rationale": rationale,
+            "candidate_queries": candidate_queries,
+            "candidate_scores": scores,
+            "planner_scores": scores,
+            "retrieved_ids": [d.id for d, _ in results],
+            "new_document_count": len(new_docs),
+            "candidate_evaluation_cost": evaluation_cost,
+            "selected_retrieval_cost": len(results),
+            "missing_information": self.missing_information
+        })
 
     def to_dict(self) -> dict:
         return {"question": self.question, "iteration": self.iteration, "selected_query": self.selected_query, "candidate_queries": self.candidate_queries, "candidate_scores": self.candidate_scores, "retrieved_document_ids": [d.id for d in self.retrieved_documents], "accumulated_evidence_ids": self.evidence_ids, "query_history": self.query_history, "missing_information": self.missing_information, "candidate_evaluation_cost": self.candidate_evaluation_cost, "selected_retrieval_cost": self.selected_retrieval_cost, "total_retrieval_cost": self.retrieval_cost, "history": self.history}
