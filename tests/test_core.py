@@ -260,4 +260,60 @@ def test_missing_information_reuses_cached_need_when_no_new_docs():
     assert cached_need == state.missing_information
 
 
+def test_end_to_end_call_path_tokens_and_placeholder_rejection(monkeypatch):
+    class InputIds(list):
+        shape = (1, 2)
+
+    class BatchEncoding(dict):
+        def to(self, device): return self
+
+    class Tokenizer:
+        chat_template = "chat"
+        eos_token_id = 0
+        def apply_chat_template(self, *args, **kwargs): return BatchEncoding(input_ids=InputIds([1, 2]))
+        def decode(self, tokens, skip_special_tokens=True):
+            return self.responses.pop(0)
+
+    class Model:
+        def __init__(self):
+            self.generate_kwargs_history = []
+        def parameters(self): return iter([SimpleNamespace(device="cpu")])
+        def generate(self, **kwargs):
+            self.generate_kwargs_history.append(dict(kwargs))
+            return [[1, 2, 3]]
+
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(inference_mode=lambda: nullcontext()))
+    provider = HuggingFaceLocalProvider("Qwen/Qwen2.5-1.5B-Instruct", do_sample=False)
+    tokenizer = Tokenizer()
+    model = Model()
+    provider.model, provider.tokenizer = model, tokenizer
+
+    # 1. Missing information call should use 80 tokens
+    tokenizer.responses = ['{"known_facts": ["Panchin is a researcher"], "missing_information": "university affiliation", "target_terms": ["Sergei Aleksandrovich Panchin", "university"], "coverage": 0.5}']
+    state = EvidenceState("Where was Sergei Aleksandrovich Panchin a professor?")
+    need = get_missing_information(state.question, state, provider)
+
+    assert need["source"] == "llm"
+    assert model.generate_kwargs_history[-1]["max_new_tokens"] == 80
+    assert "temperature" not in model.generate_kwargs_history[-1]
+    assert provider.events[-1]["settings"]["max_new_tokens"] == 80
+    assert "temperature" not in provider.events[-1]["settings"]
+
+    # 2. Candidate generation call should use 100 tokens and accept specific queries
+    tokenizer.responses = ['{"queries": ["Sergei Aleksandrovich Panchin university affiliation", "Sergei Aleksandrovich Panchin academic professor", "Panchin Moscow State University"]}']
+    candidates = generate_candidates(state.question, state, need, 3, provider)
+
+    assert len(candidates) == 3
+    assert "Sergei Aleksandrovich Panchin university affiliation" in candidates
+    assert model.generate_kwargs_history[-1]["max_new_tokens"] == 100
+    assert "temperature" not in model.generate_kwargs_history[-1]
+    assert provider.events[-1]["settings"]["max_new_tokens"] == 100
+
+    # 3. Verify generic placeholders are rejected in strict mode
+    tokenizer.responses = ['{"queries": ["entity relation", "entity location"]}']
+    with pytest.raises(ValueError, match="valid candidate queries"):
+        generate_candidates(state.question, state, need, 3, provider)
+
+
+
 

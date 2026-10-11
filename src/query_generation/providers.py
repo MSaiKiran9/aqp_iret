@@ -127,8 +127,9 @@ class HuggingFaceLocalProvider:
         else:
             inputs = self.tokenizer("\n".join(item["content"] for item in messages), return_tensors="pt")
         inputs = inputs.to(next(self.model.parameters()).device)
-        generation = {"max_new_tokens": max_new_tokens, "do_sample": self.do_sample, "pad_token_id": self.tokenizer.eos_token_id}
+        generation = {"max_new_tokens": max_new_tokens, "do_sample": False, "pad_token_id": self.tokenizer.eos_token_id}
         if self.do_sample:
+            generation["do_sample"] = True
             generation["temperature"] = self.temperature
         with torch.inference_mode():
             output = self.model.generate(**inputs, **generation)
@@ -136,7 +137,10 @@ class HuggingFaceLocalProvider:
         return self.tokenizer.decode(generated, skip_special_tokens=True), len(generated)
 
     def generation_settings(self, max_new_tokens: int | None = None) -> dict:
-        return {"max_new_tokens": max_new_tokens or self.max_new_tokens, "temperature": self.temperature, "do_sample": self.do_sample}
+        settings = {"max_new_tokens": max_new_tokens or self.max_new_tokens, "do_sample": self.do_sample}
+        if self.do_sample:
+            settings["temperature"] = self.temperature
+        return settings
 
     def release(self) -> None:
         self.model = None

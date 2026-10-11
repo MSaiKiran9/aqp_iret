@@ -61,18 +61,28 @@ def get_missing_information(question: str, state, provider: JsonCompleter | None
     return _fallback_need(question, state)
 
 
+_GENERIC_PLACEHOLDERS = {
+    "entity relation", "entity location", "search query 1", "search query 2", "search query 3",
+    "query 1", "query 2", "query 3", "query a", "query b", "query c",
+    "specific search query 1", "specific search query 2", "specific search query 3"
+}
+
+
 def generate_candidates(question: str, state, need: dict, count: int, provider: JsonCompleter | None = None) -> list[str]:
     if provider:
+        target_terms = need.get("target_terms", [])
+        terms_str = ", ".join(f"'{t}'" for t in target_terms) if target_terms else ""
         prompt = (
-            f"Task: Generate at most {count} search retrieval queries to find the missing information. "
-            "These must be search engine search queries (2 to 8 words), NOT answers to the question. "
-            "Do NOT answer the question. Do NOT output prose or explanations.\n"
-            "Output ONLY a raw JSON object matching this schema:\n"
-            '{"queries":["search query 1","search query 2"]}\n\n'
+            f"Task: Generate exactly {count} concise, specific search retrieval queries (2 to 8 words each) to retrieve documents for the missing target information.\n"
+            "Strict Instructions:\n"
+            "- Every query must be a targeted search query for the missing entity, relation, or affiliation. They must be search retrieval queries, NOT answers to the question. Do NOT answer the question.\n"
+            "- Directly preserve and include the specific named entities and target terms from the target question and missing need (e.g., named persons, universities, affiliations).\n"
+            "- NEVER use generic placeholders like 'entity relation' or 'entity location'.\n"
+            "- Output ONLY a raw JSON object matching this schema:\n"
+            '{"queries": ["specific search query 1", "specific search query 2", "specific search query 3"]}\n\n'
             f"Target Question: {question}\n"
-            f"Current Evidence: {[d.text for d in state.accumulated_evidence]}\n"
             f"Missing Information Need: {need.get('missing_information', '')}\n"
-            f"Target Search Terms: {need.get('target_terms', [])}\n\n"
+            f"Target Terms & Entities: [{terms_str}]\n\n"
             "JSON:"
         )
         try:
@@ -96,7 +106,14 @@ def generate_candidates(question: str, state, need: dict, count: int, provider: 
 
 def _valid_query(value: str) -> bool:
     query = value.strip()
-    return 1 <= len(query.split()) <= 20 and len(query) <= 200 and not any(marker in query for marker in ("{", "}", "\n"))
+    lower = query.lower()
+    if lower in _GENERIC_PLACEHOLDERS:
+        return False
+    if "entity relation" in lower or "entity location" in lower:
+        return False
+    if any(marker in query for marker in ("{", "}", "\n", "<", ">")):
+        return False
+    return 1 <= len(query.split()) <= 20 and len(query) <= 200
 
 
 def _valid_information_need(data: dict) -> bool:
