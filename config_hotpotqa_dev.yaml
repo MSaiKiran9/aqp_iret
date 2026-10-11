@@ -22,6 +22,8 @@ llm:
   models:
     - id: Qwen/Qwen2.5-1.5B-Instruct
       trust_remote_code: false
+    - id: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+      trust_remote_code: false
 planner:
   relevance_weight: 0.45
   missing_information_weight: 0.35

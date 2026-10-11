@@ -1,0 +1,40 @@
+seed: 42
+dataset:
+  name: demo
+  sample_size: 2
+retrieval:
+  top_k: 2
+  max_iterations: 3
+  budget: 24
+  positive_scores_only: true
+query_generation:
+  candidate_count: 3
+llm:
+  enabled: false
+  provider: huggingface_local
+  strict: true
+  device: auto
+  precision: auto
+  max_new_tokens: 192
+  temperature: 0.2
+  do_sample: false
+  models:
+    - id: Qwen/Qwen2.5-1.5B-Instruct
+      trust_remote_code: false
+    - id: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+      trust_remote_code: false
+planner:
+  relevance_weight: 0.45
+  missing_information_weight: 0.35
+  redundancy_weight: 0.15
+  cost_weight: 0.05
+  enabled: [relevance, missing, redundancy, cost]
+stopping:
+  min_iterations: 2
+  min_new_documents: 1
+  min_missing_coverage: 0.75
+  no_gain_limit: 1
+output:
+  directory: results_pilot
+verbose: false
+

@@ -315,5 +315,108 @@ def test_end_to_end_call_path_tokens_and_placeholder_rejection(monkeypatch):
         generate_candidates(state.question, state, need, 3, provider)
 
 
+def test_pipeline_telemetry_and_strict_error_handling():
+    example, retriever, stop, planner = components()
+
+    class TelemetryMockProvider:
+        strict = True
+        model_id = "mock_model"
+        def __init__(self):
+            self.events = []
+        def complete_json(self, prompt, max_new_tokens=None):
+            if "information need" in prompt:
+                self.events.append({"kind": "generation_attempt", "success": False, "output": {"new_token_count": 15}})
+                self.events.append({"kind": "generation", "success": True, "output": {"new_token_count": 45}})
+                return {"known_facts": ["fact"], "missing_information": "need", "target_terms": ["term"], "coverage": 0.5}
+            return {"queries": ["valid query 1", "valid query 2"]}
+
+    provider = TelemetryMockProvider()
+    record = run_adaptive(example, retriever, planner, stop, 2, 2, provider)
+    assert record["generated_tokens"] == 60
+    assert record["model_calls"] == 2
+    assert record["retries"] == 1
+    assert record["structured_output_failures"] == 1
+    assert record["error"] is None
+
+    class CrashingStrictProvider:
+        strict = True
+        model_id = "crashing_model"
+        def __init__(self):
+            self.events = []
+        def complete_json(self, prompt, max_new_tokens=None):
+            self.events.append({"kind": "generation_attempt", "success": False, "output": {"new_token_count": 5}})
+            raise RuntimeError("Structured output parsing completely failed")
+
+    crash_provider = CrashingStrictProvider()
+    crash_record = run_adaptive(example, retriever, planner, stop, 2, 2, crash_provider)
+    assert crash_record["error"] is not None
+    assert "Structured output parsing completely failed" in crash_record["error"]
+    assert crash_record["stopping_reason"].startswith("error:")
+    assert crash_record["structured_output_failures"] == 1
 
 
+def test_summarise_and_reporting_artifacts(tmp_path):
+    from src.evaluation.metrics import summarise, save_results
+    from src.evaluation.reporting import save_comparison, generate_report, generate_candidate_traces
+
+    records = [
+        {
+            "id": "q1",
+            "method": "adaptive",
+            "model_id": "test_model",
+            "first_step_recall_at_k": 0.5,
+            "best_step_recall_at_k": 1.0,
+            "accumulated_evidence_recall": 1.0,
+            "steps": 2,
+            "candidate_evaluation_cost": 6,
+            "selected_retrieval_cost": 4,
+            "retrieval_cost": 10,
+            "generation_latency_seconds": 0.1,
+            "retrieval_latency_seconds": 0.05,
+            "end_to_end_latency_seconds": 0.15,
+            "generated_tokens": 120,
+            "model_calls": 3,
+            "retries": 1,
+            "structured_output_failures": 0,
+            "stopping_reason": "evidence_sufficient",
+            "error": None,
+            "retrieved_ids": "d1 d2",
+            "state": {
+                "question": "What is the capital?",
+                "history": [
+                    {
+                        "iteration": 1,
+                        "selected_query": "capital search",
+                        "new_document_count": 1,
+                        "candidate_scores": [
+                            {"query": "capital search", "total": 0.8, "relevance": 0.9, "missing": 0.8, "redundancy": 0.0, "cost": 0.5, "selection_rationale": "top score"}
+                        ]
+                    }
+                ]
+            }
+        }
+    ]
+
+    summary = summarise(records)
+    assert summary["questions"] == 1
+    assert summary["first_step_recall_at_k"] == 0.5
+    assert summary["evidence_recall_at_k"] == 1.0
+    assert summary["total_generated_tokens"] == 120
+    assert summary["failed_cases"] == 0
+
+    save_results(records, summary, tmp_path, "adaptive_test", config={"test": True}, metadata={"timestamp": "test"})
+    assert (tmp_path / "adaptive_test_summary.json").exists()
+    assert (tmp_path / "adaptive_test_records.csv").exists()
+    assert (tmp_path / "run_metadata.json").exists()
+
+    rows = save_comparison({"adaptive_test": summary}, tmp_path)
+    assert len(rows) == 1
+    assert (tmp_path / "comparison.csv").exists()
+
+    report_text = generate_report({"adaptive_test": summary}, rows, tmp_path, config={"dataset": {"name": "test"}}, metadata={"timestamp": "test"})
+    assert "Experiment Report" in report_text
+    assert (tmp_path / "experiment_report.md").exists()
+
+    trace_text = generate_candidate_traces(records, tmp_path)
+    assert "Candidate Query Scoring" in trace_text
+    assert (tmp_path / "demo_walkthrough.md").exists()

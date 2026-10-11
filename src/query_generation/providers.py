@@ -108,7 +108,7 @@ class HuggingFaceLocalProvider:
                 raw_outputs.append(diagnostic)
                 try:
                     value = _json_object(text)
-                    self.events.append({"kind": "generation", "model_id": self.model_id, "success": True, "seconds": round(time.perf_counter() - started, 4), "attempt": attempt + 1, "settings": self.generation_settings(token_budget)})
+                    self.events.append({"kind": "generation", "model_id": self.model_id, "success": True, "seconds": round(time.perf_counter() - started, 4), "attempt": attempt + 1, "output": diagnostic, "settings": self.generation_settings(token_budget)})
                     return value
                 except ValueError as error:
                     self.events.append({"kind": "generation_attempt", "model_id": self.model_id, "success": False, "attempt": attempt + 1, "error": str(error), "output": diagnostic})

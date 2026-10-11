@@ -9,4 +9,24 @@ def run_one_shot(example, retriever, top_k: int, positive_scores_only: bool = Tr
     elapsed = time.perf_counter() - started
     ids = [doc.id for doc, _ in results]
     history = [{"retrieved_ids": ids}]
-    return {"id": example.id, "method": "one_shot", **evidence_metrics(history, ids, example.supporting_ids, top_k), "steps": 1, "candidate_evaluation_cost": 0, "selected_retrieval_cost": len(results), "retrieval_cost": len(results), "generation_latency_seconds": 0.0, "retrieval_latency_seconds": round(elapsed, 6), "end_to_end_latency_seconds": round(elapsed, 6), "model_id": "retrieval_only", "stopping_reason": "one_shot", "retrieved_ids": " ".join(ids), "state": {"query": example.question, "retrieved_ids": ids}}
+    return {
+        "id": example.id,
+        "method": "one_shot",
+        **evidence_metrics(history, ids, example.supporting_ids, top_k),
+        "steps": 1,
+        "candidate_evaluation_cost": 0,
+        "selected_retrieval_cost": len(results),
+        "retrieval_cost": len(results),
+        "generation_latency_seconds": 0.0,
+        "retrieval_latency_seconds": round(elapsed, 6),
+        "end_to_end_latency_seconds": round(elapsed, 6),
+        "generated_tokens": 0,
+        "model_calls": 0,
+        "retries": 0,
+        "structured_output_failures": 0,
+        "model_id": "retrieval_only",
+        "stopping_reason": "one_shot",
+        "error": None,
+        "retrieved_ids": " ".join(ids),
+        "state": {"query": example.question, "retrieved_ids": ids}
+    }
