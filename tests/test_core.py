@@ -179,3 +179,32 @@ def test_cache_compatibility_patch_for_legacy_cache_models(monkeypatch):
     assert hasattr(cache_instance, "get_max_length")
     assert cache_instance.get_max_length() is None
 
+
+def test_prompt_instructions_and_structured_candidate_generation():
+    recorded_prompts = []
+
+    class MockStructuredProvider:
+        strict = True
+        def complete_json(self, prompt: str) -> dict:
+            recorded_prompts.append(prompt)
+            if "information need" in prompt:
+                return {
+                    "known_facts": ["Tokarev was a professor"],
+                    "missing_information": "which university",
+                    "target_terms": ["Tokarev", "university"],
+                    "coverage": 0.5,
+                }
+            return {"queries": ["Tokarev university", "Sergei Tokarev professor"]}
+
+    state = EvidenceState("Where was Tokarev a professor?")
+    need = get_missing_information(state.question, state, MockStructuredProvider())
+    assert need["source"] == "llm"
+    assert need["missing_information"] == "which university"
+    assert "Do NOT answer the question" in recorded_prompts[0]
+
+    candidates = generate_candidates(state.question, state, need, 2, MockStructuredProvider())
+    assert candidates == ["Tokarev university", "Sergei Tokarev professor"]
+    assert "search retrieval queries" in recorded_prompts[1]
+    assert "NOT answers to the question" in recorded_prompts[1]
+
+

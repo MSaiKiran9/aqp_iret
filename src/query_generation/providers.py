@@ -99,7 +99,7 @@ class HuggingFaceLocalProvider:
         started = time.perf_counter()
         raw_outputs = []
         try:
-            system = {"role": "system", "content": "Output only the requested JSON object. No explanation or Markdown."}
+            system = {"role": "system", "content": "You are a retrieval query assistant. You must output only a valid JSON object matching the requested schema. Never answer the question directly. Do not include markdown, explanations, notes, or commentary. Output raw JSON starting with '{' and ending with '}'."}
             messages = [system, {"role": "user", "content": prompt}]
             for attempt in range(2):
                 text, new_token_count = self._generate_text(messages, self.max_new_tokens)
@@ -112,7 +112,7 @@ class HuggingFaceLocalProvider:
                 except ValueError as error:
                     self.events.append({"kind": "generation_attempt", "model_id": self.model_id, "success": False, "attempt": attempt + 1, "error": str(error), "output": diagnostic})
                     if attempt == 0:
-                        messages = [system, {"role": "user", "content": "Return only the JSON object requested below. Do not continue or discuss any prior response.\n" + prompt}]
+                        messages = [system, {"role": "user", "content": "Your previous response was not valid JSON. Do not answer the question or output prose. Output ONLY the raw JSON object starting with '{' and ending with '}':\n" + prompt}]
                         continue
                     raise
         except Exception as error:
