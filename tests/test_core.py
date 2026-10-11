@@ -181,12 +181,12 @@ def test_cache_compatibility_patch_for_legacy_cache_models(monkeypatch):
 
 
 def test_prompt_instructions_and_structured_candidate_generation():
-    recorded_prompts = []
+    recorded_calls = []
 
     class MockStructuredProvider:
         strict = True
-        def complete_json(self, prompt: str) -> dict:
-            recorded_prompts.append(prompt)
+        def complete_json(self, prompt: str, max_new_tokens: int | None = None) -> dict:
+            recorded_calls.append((prompt, max_new_tokens))
             if "information need" in prompt:
                 return {
                     "known_facts": ["Tokarev was a professor"],
@@ -200,11 +200,64 @@ def test_prompt_instructions_and_structured_candidate_generation():
     need = get_missing_information(state.question, state, MockStructuredProvider())
     assert need["source"] == "llm"
     assert need["missing_information"] == "which university"
-    assert "Do NOT answer the question" in recorded_prompts[0]
+    assert "Do NOT answer the question" in recorded_calls[0][0]
+    assert recorded_calls[0][1] == 80
 
     candidates = generate_candidates(state.question, state, need, 2, MockStructuredProvider())
     assert candidates == ["Tokarev university", "Sergei Tokarev professor"]
-    assert "search retrieval queries" in recorded_prompts[1]
-    assert "NOT answers to the question" in recorded_prompts[1]
+    assert "search retrieval queries" in recorded_calls[1][0]
+    assert "NOT answers to the question" in recorded_calls[1][0]
+    assert recorded_calls[1][1] == 100
+
+
+def test_provider_retry_on_malformed_json_and_token_limits(monkeypatch):
+    class InputIds(list):
+        shape = (1, 2)
+
+    class BatchEncoding(dict):
+        def to(self, device): return self
+
+    class Tokenizer:
+        chat_template = "chat"
+        eos_token_id = 0
+        def apply_chat_template(self, *args, **kwargs): return BatchEncoding(input_ids=InputIds([1, 2]))
+        def decode(self, tokens, skip_special_tokens=True):
+            return self.responses.pop(0)
+
+    class Model:
+        def __init__(self): self.budgets = []
+        def parameters(self): return iter([SimpleNamespace(device="cpu")])
+        def generate(self, **kwargs):
+            self.budgets.append(kwargs["max_new_tokens"])
+            return [[1, 2, 3]]
+
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(inference_mode=lambda: nullcontext()))
+    provider = HuggingFaceLocalProvider("Qwen/Qwen2.5-1.5B-Instruct")
+    tokenizer = Tokenizer()
+    tokenizer.responses = ["Sorry, I cannot answer.", '{"queries": ["Qwen retrieval test"]}']
+    provider.model, provider.tokenizer = Model(), tokenizer
+
+    result = provider.complete_json("schema prompt", max_new_tokens=100)
+    assert result == {"queries": ["Qwen retrieval test"]}
+    assert provider.model.budgets == [100, 100]
+    assert len(provider.events) == 2
+    assert provider.events[0]["kind"] == "generation_attempt"
+    assert provider.events[1]["kind"] == "generation" and provider.events[1]["success"] is True
+
+
+def test_missing_information_reuses_cached_need_when_no_new_docs():
+    state = EvidenceState("Where was Tokarev a professor?")
+    state.missing_information = {"known_facts": ["fact"], "missing_information": "need", "target_terms": ["tokarev"], "coverage": 0.5}
+    state.iteration = 1
+    state.history = [{"iteration": 1, "new_document_count": 0}]
+
+    class FailIfCalledProvider:
+        strict = True
+        def complete_json(self, *args, **kwargs):
+            raise AssertionError("Provider should not be called when no new documents were found")
+
+    cached_need = get_missing_information(state.question, state, FailIfCalledProvider())
+    assert cached_need == state.missing_information
+
 
 

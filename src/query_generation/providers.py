@@ -94,20 +94,21 @@ class HuggingFaceLocalProvider:
             self.events.append({"kind": "load", "model_id": self.model_id, "success": False, "error": repr(error), "seconds": round(time.perf_counter() - started, 4)})
             raise RuntimeError(f"Could not load {self.model_id}: {error}") from error
 
-    def complete_json(self, prompt: str) -> dict:
+    def complete_json(self, prompt: str, max_new_tokens: int | None = None) -> dict:
         self._load()
         started = time.perf_counter()
         raw_outputs = []
+        token_budget = max_new_tokens if max_new_tokens is not None else self.max_new_tokens
         try:
             system = {"role": "system", "content": "You are a retrieval query assistant. You must output only a valid JSON object matching the requested schema. Never answer the question directly. Do not include markdown, explanations, notes, or commentary. Output raw JSON starting with '{' and ending with '}'."}
             messages = [system, {"role": "user", "content": prompt}]
             for attempt in range(2):
-                text, new_token_count = self._generate_text(messages, self.max_new_tokens)
+                text, new_token_count = self._generate_text(messages, token_budget)
                 diagnostic = _output_diagnostic(text, new_token_count)
                 raw_outputs.append(diagnostic)
                 try:
                     value = _json_object(text)
-                    self.events.append({"kind": "generation", "model_id": self.model_id, "success": True, "seconds": round(time.perf_counter() - started, 4), "attempt": attempt + 1, "settings": self.generation_settings()})
+                    self.events.append({"kind": "generation", "model_id": self.model_id, "success": True, "seconds": round(time.perf_counter() - started, 4), "attempt": attempt + 1, "settings": self.generation_settings(token_budget)})
                     return value
                 except ValueError as error:
                     self.events.append({"kind": "generation_attempt", "model_id": self.model_id, "success": False, "attempt": attempt + 1, "error": str(error), "output": diagnostic})
@@ -116,7 +117,7 @@ class HuggingFaceLocalProvider:
                         continue
                     raise
         except Exception as error:
-            self.events.append({"kind": "generation", "model_id": self.model_id, "success": False, "error": repr(error), "raw_outputs": raw_outputs, "seconds": round(time.perf_counter() - started, 4), "settings": self.generation_settings()})
+            self.events.append({"kind": "generation", "model_id": self.model_id, "success": False, "error": repr(error), "raw_outputs": raw_outputs, "seconds": round(time.perf_counter() - started, 4), "settings": self.generation_settings(token_budget)})
             raise RuntimeError(f"{self.model_id} produced no valid structured output: {error}") from error
 
     def _generate_text(self, messages: list[dict], max_new_tokens: int) -> tuple[str, int]:
@@ -134,8 +135,8 @@ class HuggingFaceLocalProvider:
         generated = output[0][inputs["input_ids"].shape[-1]:]
         return self.tokenizer.decode(generated, skip_special_tokens=True), len(generated)
 
-    def generation_settings(self) -> dict:
-        return {"max_new_tokens": self.max_new_tokens, "temperature": self.temperature, "do_sample": self.do_sample}
+    def generation_settings(self, max_new_tokens: int | None = None) -> dict:
+        return {"max_new_tokens": max_new_tokens or self.max_new_tokens, "temperature": self.temperature, "do_sample": self.do_sample}
 
     def release(self) -> None:
         self.model = None

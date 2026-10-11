@@ -28,8 +28,17 @@ def _fallback_need(question: str, state) -> dict:
     return {"known_facts": observed[-5:], "missing_information": f"Find the {' and '.join(targets) or 'answer'} linked to {'; '.join(focus[:2]) or 'the question'}.", "target_terms": focus[:3] + targets, "coverage": coverage, "source": "deterministic_fallback"}
 
 
+def _call_complete_json(provider: JsonCompleter, prompt: str, max_new_tokens: int | None = None) -> dict:
+    try:
+        return provider.complete_json(prompt, max_new_tokens=max_new_tokens)
+    except TypeError:
+        return provider.complete_json(prompt)
+
+
 def get_missing_information(question: str, state, provider: JsonCompleter | None = None) -> dict:
     """Use configured LLM structured output; fall back deterministically when unavailable."""
+    if state.iteration > 0 and state.history and state.history[-1].get("new_document_count") == 0 and state.missing_information:
+        return state.missing_information
     if provider:
         prompt = (
             "Task: Analyze the information need for retrieving documents to answer the target question. "
@@ -41,7 +50,7 @@ def get_missing_information(question: str, state, provider: JsonCompleter | None
             "JSON:"
         )
         try:
-            data = provider.complete_json(prompt)
+            data = _call_complete_json(provider, prompt, max_new_tokens=80)
             if _valid_information_need(data):
                 return {"known_facts": [str(x) for x in data["known_facts"]], "missing_information": str(data["missing_information"]), "target_terms": [str(x) for x in data["target_terms"]], "coverage": float(data["coverage"]), "source": "llm"}
             if getattr(provider, "strict", False):
@@ -67,7 +76,7 @@ def generate_candidates(question: str, state, need: dict, count: int, provider: 
             "JSON:"
         )
         try:
-            res = provider.complete_json(prompt)
+            res = _call_complete_json(provider, prompt, max_new_tokens=100)
             raw_queries = res.get("queries", []) if isinstance(res, dict) else []
             if isinstance(raw_queries, str):
                 raw_queries = [raw_queries]

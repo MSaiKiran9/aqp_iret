@@ -20,7 +20,7 @@ llm:
   temperature: 0.2
   do_sample: false
   models:
-    - id: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+    - id: Qwen/Qwen2.5-1.5B-Instruct
       trust_remote_code: false
 planner:
   relevance_weight: 0.45
