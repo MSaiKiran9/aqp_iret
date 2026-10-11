@@ -11,7 +11,7 @@ retrieval:
 query_generation:
   candidate_count: 3
 llm:
-  enabled: false
+  enabled: true
   provider: huggingface_local
   strict: true
   device: auto
