@@ -39,7 +39,8 @@ def main():
     stopping = StoppingConfig(retrieval["max_iterations"], retrieval["budget"], stop_values["min_iterations"], stop_values["min_new_documents"], stop_values["min_missing_coverage"], stop_values["no_gain_limit"])
     values = config["planner"]
     planner = AdaptiveQueryPlanner(retriever, PlannerConfig(values["relevance_weight"], values["missing_information_weight"], values["redundancy_weight"], values["cost_weight"], tuple(values["enabled"])), retrieval["positive_scores_only"])
-    provider = build_provider(config["llm"])
+    model_spec = config["llm"]["models"][0] if config.get("llm", {}).get("models") else None
+    provider = build_provider(config["llm"], model_spec)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output = Path(args.output or config["output"]["directory"]) / stamp
     query = config["query_generation"]
